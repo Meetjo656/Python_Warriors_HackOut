@@ -21,307 +21,248 @@ class MapBuilder:
 
         # Add custom title to map
         title_html = '''
-                     <h3 align="center" style="font-size:20px; color:#2E8B57;">
-                     <b>🌿 Green Hydrogen Infrastructure Map of India</b></h3>
-                     '''
+        <h3 align="center" style="font-size:20px"><b>🌿 Green Hydrogen Infrastructure Map</b></h3>
+        '''
         m.get_root().html.add_child(folium.Element(title_html))
 
-        # Add different tile layers
-        folium.TileLayer(
-            tiles='https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-            attr='OpenStreetMap',
-            name='🗺️ Street Map'
-        ).add_to(m)
-
-        folium.TileLayer(
-            tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-            attr='Esri',
-            name='🛰️ Satellite View',
-            overlay=False,
-            control=True
-        ).add_to(m)
-
         return m
 
-    def add_infrastructure_layer(self, m, infrastructure_data: pd.DataFrame):
-        """Add H2 infrastructure to map with detailed popups"""
+    def add_infrastructure(self, folium_map, infrastructure_data: pd.DataFrame):
+        """Add H2 infrastructure facilities to the map"""
+        if infrastructure_data.empty:
+            return
 
-        # H2-SPECIFIC STYLING
-        type_config = {
-            'existing_plant': {'color': 'green', 'icon': 'flash', 'prefix': 'fa'},
-            'planned_plant': {'color': 'darkgreen', 'icon': 'plus', 'prefix': 'fa'},
-            'storage': {'color': 'blue', 'icon': 'database', 'prefix': 'fa'}
+        # Color mapping for different facility types
+        colors = {
+            'existing_plant': 'green',
+            'planned_plant': 'darkgreen',
+            'storage': 'blue'
         }
 
-        # Create H2-focused feature groups with emojis
-        existing_h2_fg = folium.FeatureGroup(name='🏭 Existing H2 Plants')
-        planned_h2_fg = folium.FeatureGroup(name='🚀 Planned H2 Megaplants')
-        h2_storage_fg = folium.FeatureGroup(name='🏗️ H2 Storage Hubs')
+        # Icons for different facility types
+        icons = {
+            'existing_plant': 'leaf',
+            'planned_plant': 'cog',
+            'storage': 'tint'
+        }
 
-        for _, facility in infrastructure_data.iterrows():
-            config = type_config.get(facility['type'], type_config['existing_plant'])
+        for idx, facility in infrastructure_data.iterrows():
+            facility_type = facility.get('type', 'existing_plant')
+            color = colors.get(facility_type, 'green')
+            icon = icons.get(facility_type, 'leaf')
 
-            # H2-SPECIFIC DETAILED POPUP CONTENT
-            if facility['type'] in ['existing_plant', 'planned_plant']:
-                popup_content = f"""
-                <div style="width: 300px; font-family: Arial, sans-serif;">
-                    <h4 style="color: #2E8B57; margin-bottom: 10px;">
-                        🌿 {facility['name']}
-                    </h4>
-                    <hr style="margin: 8px 0;">
-                    <p><strong>🔋 H2 Capacity:</strong> {facility['capacity']:.1f} MW</p>
-                    <p><strong>⚙️ Technology:</strong> {facility.get('technology', 'N/A')}</p>
-                    <p><strong>🏭 Production Type:</strong> {facility.get('production_type', 'N/A')}</p>
-                    <p><strong>🧪 H2 Purity:</strong> {facility.get('h2_purity', 'N/A'):.2f}%</p>
-                    <p><strong>📊 Annual H2 Production:</strong> {facility.get('annual_h2_production', 'N/A'):,.0f} tons/year</p>
-                    <p><strong>🌱 Carbon Intensity:</strong> {facility.get('carbon_intensity', 'N/A')} kg CO2/kg H2</p>
-                    <p><strong>♻️ Renewable Powered:</strong> {'✅ Yes' if facility.get('renewable_powered', False) else '❌ No'}</p>
-                    <p><strong>💰 Investment:</strong> ${facility['investment_cost']:.1f}M</p>
-                    <p><strong>📍 Status:</strong> {facility['status'].replace('_', ' ').title()}</p>
-                </div>
-                """
-            else:  # H2 Storage
-                popup_content = f"""
-                <div style="width: 300px; font-family: Arial, sans-serif;">
-                    <h4 style="color: #4682B4; margin-bottom: 10px;">
-                        🏗️ {facility['name']}
-                    </h4>
-                    <hr style="margin: 8px 0;">
-                    <p><strong>🛢️ H2 Storage Capacity:</strong> {facility['capacity']:,.0f} tons</p>
-                    <p><strong>⚙️ Storage Technology:</strong> {facility.get('technology', 'N/A')}</p>
-                    <p><strong>📊 Storage Pressure:</strong> {facility.get('storage_pressure', 'N/A')} bar</p>
-                    <p><strong>💰 Investment:</strong> ${facility['investment_cost']:.1f}M</p>
-                    <p><strong>🎯 Strategic Reserve:</strong> {'✅ Yes' if facility.get('strategic_reserve', False) else '❌ No'}</p>
-                    <p><strong>📍 Status:</strong> {facility['status'].replace('_', ' ').title()}</p>
-                </div>
-                """
+            # Create detailed popup
+            popup_html = f"""
+            <div style="width: 300px;">
+                <h4>🏭 {facility['name']}</h4>
+                <hr>
+                <b>🔋 H2 Capacity:</b> {facility['capacity']:.1f} MW<br>
+                <b>⚙️ Technology:</b> {facility.get('technology', 'N/A')}<br>
+                <b>🏭 Production Type:</b> {facility.get('production_type', 'N/A')}<br>
+                <b>🧪 H2 Purity:</b> {facility.get('h2_purity', 'N/A'):.2f}%<br>
+                <b>📊 Annual H2 Production:</b> {facility.get('annual_h2_production', 'N/A'):,.0f} tons/year<br>
+                <b>🌱 Carbon Intensity:</b> {facility.get('carbon_intensity', 'N/A')} kg CO2/kg H2<br>
+                <b>♻️ Renewable Powered:</b> {'✅ Yes' if facility.get('renewable_powered', False) else '❌ No'}<br>
+                <b>💰 Investment:</b> ${facility['investment_cost']:.1f}M<br>
+                <b>📍 Status:</b> {facility['status'].replace('_', ' ').title()}
+            </div>
+            """
 
-            marker = folium.Marker(
+            # Add marker to map
+            folium.Marker(
                 location=[facility['latitude'], facility['longitude']],
-                popup=folium.Popup(popup_content, max_width=350),
-                tooltip=f"🌿 {facility['name']} - Click for details",
-                icon=folium.Icon(
-                    color=config['color'],
-                    icon=config['icon'],
-                    prefix=config['prefix']
-                )
-            )
+                popup=folium.Popup(popup_html, max_width=400),
+                tooltip=f"{facility['name']} ({facility['capacity']:.0f} MW)",
+                icon=folium.Icon(color=color, icon=icon, prefix='fa')
+            ).add_to(folium_map)
 
-            # Add to appropriate feature group
-            if facility['type'] == 'existing_plant':
-                marker.add_to(existing_h2_fg)
-            elif facility['type'] == 'planned_plant':
-                marker.add_to(planned_h2_fg)
-            else:
-                marker.add_to(h2_storage_fg)
+    def add_renewable_sources(self, folium_map, renewable_data: pd.DataFrame):
+        """Add renewable energy sources to the map"""
+        if renewable_data.empty:
+            return
 
-        # Add feature groups to map
-        existing_h2_fg.add_to(m)
-        planned_h2_fg.add_to(m)
-        h2_storage_fg.add_to(m)
-
-        return m
-
-    def add_renewable_layer(self, m, renewable_data: pd.DataFrame):
-        """Add renewable sources optimized for H2 production"""
-
-        renewable_h2_fg = folium.FeatureGroup(name='⚡ Renewable-to-H2 Sources')
-
-        type_colors = {
+        # Color mapping for renewable types
+        colors = {
             'solar': 'orange',
             'wind': 'lightblue',
-            'hydro': 'darkblue'
+            'hydro': 'blue'
         }
 
-        type_icons = {
-            'solar': '☀️',
-            'wind': '💨',
-            'hydro': '💧'
+        icons = {
+            'solar': 'sun-o',
+            'wind': 'leaf',
+            'hydro': 'tint'
         }
 
-        for _, source in renewable_data.iterrows():
-            color = type_colors.get(source['type'], 'orange')
-            icon_emoji = type_icons.get(source['type'], '⚡')
+        for idx, source in renewable_data.iterrows():
+            source_type = source.get('type', 'solar')
+            color = colors.get(source_type, 'orange')
+            icon = icons.get(source_type, 'sun-o')
 
-            # H2-FOCUSED RENEWABLE POPUP
-            popup_content = f"""
-            <div style="width: 320px; font-family: Arial, sans-serif;">
-                <h4 style="color: #FF8C00; margin-bottom: 10px;">
-                    {icon_emoji} {source['name']}
-                </h4>
-                <hr style="margin: 8px 0;">
-                <p><strong>⚡ Energy Type:</strong> {source['type'].title()}-to-H2</p>
-                <p><strong>🔋 Capacity:</strong> {source['capacity']:.1f} MW</p>
-                <p><strong>🎯 Dedicated H2 Production:</strong> {'✅ Yes' if source.get('dedicated_h2_production', False) else '❌ No'}</p>
-                <p><strong>🌿 H2 Electrolyzer Capacity:</strong> {source.get('h2_electrolyzer_capacity', 0):.1f} MW</p>
-                <p><strong>📊 Annual H2 Potential:</strong> {source.get('annual_h2_potential', source.get('potential_h2_production', 0)):,.0f} tons/year</p>
-                <p><strong>🔌 Grid Connected:</strong> {'✅ Yes' if source.get('grid_connection', True) else '❌ No'}</p>
-                <p><strong>💧 Water Access:</strong> {source.get('water_access_rating', source.get('water_access', 'N/A'))}</p>
-                <p><strong>🚢 Distance to Port:</strong> {source.get('distance_to_port', 'N/A'):.0f} km</p>
+            # Create detailed popup
+            popup_html = f"""
+            <div style="width: 300px;">
+                <h4>⚡ {source['name']}</h4>
+                <hr>
+                <b>⚡ Energy Type:</b> {source['type'].title()}-to-H2<br>
+                <b>🔋 Capacity:</b> {source['capacity']:.1f} MW<br>
+                <b>🎯 Dedicated H2 Production:</b> {'✅ Yes' if source.get('dedicated_h2_production', False) else '❌ No'}<br>
+                <b>🌿 H2 Electrolyzer Capacity:</b> {source.get('h2_electrolyzer_capacity', 0):.1f} MW<br>
+                <b>📊 Annual H2 Potential:</b> {source.get('annual_h2_potential', source.get('potential_h2_production', 0)):,.0f} tons/year<br>
+                <b>🔌 Grid Connected:</b> {'✅ Yes' if source.get('grid_connection', True) else '❌ No'}<br>
+                <b>💧 Water Access:</b> {source.get('water_access_rating', source.get('water_access', 'N/A'))}<br>
+                <b>🚢 Distance to Port:</b> {source.get('distance_to_port', 'N/A'):.0f} km
             </div>
             """
 
-            # Different marker size for dedicated H2 facilities
-            radius = 15 if source.get('dedicated_h2_production', False) else 10
-
-            folium.CircleMarker(
+            # Add marker to map
+            folium.Marker(
                 location=[source['latitude'], source['longitude']],
-                radius=radius,
-                popup=folium.Popup(popup_content, max_width=350),
-                tooltip=f"{icon_emoji} {source['name']} - H2 Potential: {source.get('annual_h2_potential', source.get('potential_h2_production', 0)):,.0f} tons/year",
-                color='black',
-                weight=2,
-                fill=True,
-                fillColor=color,
-                fillOpacity=0.8
-            ).add_to(renewable_h2_fg)
+                popup=folium.Popup(popup_html, max_width=400),
+                tooltip=f"{source['name']} ({source['capacity']:.0f} MW)",
+                icon=folium.Icon(color=color, icon=icon, prefix='fa')
+            ).add_to(folium_map)
 
-        renewable_h2_fg.add_to(m)
-        return m
+    def add_demand_centers(self, folium_map, demand_data: pd.DataFrame):
+        """Add H2 demand centers to the map"""
+        if demand_data.empty:
+            return
 
-    def add_demand_layer(self, m, demand_data: pd.DataFrame):
-        """Add H2 demand centers with industry-specific styling"""
+        # Determine correct column names
+        demand_col = 'annual_h2_demand' if 'annual_h2_demand' in demand_data.columns else 'annual_demand'
+        supply_gap_col = 'h2_supply_gap' if 'h2_supply_gap' in demand_data.columns else 'supply_gap'
+        wtp_col = 'willingness_to_pay_h2' if 'willingness_to_pay_h2' in demand_data.columns else 'willingness_to_pay'
 
-        h2_demand_fg = folium.FeatureGroup(name='🏭 H2 Demand Centers')
-
-        # H2 industry colors and icons
-        industry_config = {
-            'Green Steel Production': {'color': 'red', 'icon': '🏭'},
-            'Hydrogen Mobility/Transportation': {'color': 'purple', 'icon': '🚛'},
-            'H2 Mobility & Transport': {'color': 'purple', 'icon': '🚛'},
-            'Green Ammonia Production': {'color': 'darkred', 'icon': '🌱'},
-            'Hydrogen Fuel Cells': {'color': 'pink', 'icon': '🔋'},
-            'H2 Fuel Cells': {'color': 'pink', 'icon': '🔋'},
-            'Green Hydrogen Export': {'color': 'cadetblue', 'icon': '🚢'},
-            'Green H2 Export': {'color': 'cadetblue', 'icon': '🚢'},
-            'Hydrogen Power Generation': {'color': 'orange', 'icon': '⚡'},
-            'H2 Power Generation': {'color': 'orange', 'icon': '⚡'},
-            'Industrial Heating (H2)': {'color': 'gray', 'icon': '🔥'},
-            'Industrial H2 Applications': {'color': 'gray', 'icon': '🔥'},
-            'Hydrogen Refining': {'color': 'lightred', 'icon': '⚗️'},
-            'H2 Refining': {'color': 'lightred', 'icon': '⚗️'}
-        }
-
-        for _, center in demand_data.iterrows():
-            industry_info = industry_config.get(center['industry'], {'color': 'red', 'icon': '🏭'})
-            color = industry_info['color']
-            icon_emoji = industry_info['icon']
-
-            # H2-SPECIFIC DEMAND POPUP
-            demand_col = 'annual_h2_demand' if 'annual_h2_demand' in center else 'annual_demand'
-            supply_gap_col = 'h2_supply_gap' if 'h2_supply_gap' in center else 'supply_gap'
-            wtp_col = 'willingness_to_pay_h2' if 'willingness_to_pay_h2' in center else 'willingness_to_pay'
-
-            popup_content = f"""
-            <div style="width: 340px; font-family: Arial, sans-serif;">
-                <h4 style="color: #DC143C; margin-bottom: 10px;">
-                    {icon_emoji} {center['name']}
-                </h4>
-                <hr style="margin: 8px 0;">
-                <p><strong>🏭 H2 Industry:</strong> {center['industry']}</p>
-                <p><strong>📊 Annual H2 Demand:</strong> {center.get(demand_col, 0):,.0f} tons/year</p>
-                <p><strong>📈 H2 Supply Gap:</strong> {center.get(supply_gap_col, 0):,.0f} tons/year</p>
-                <p><strong>🌿 Green H2 Preference:</strong> {'✅ Yes' if center.get('green_h2_preference', False) else '❌ No'}</p>
-                <p><strong>💰 Willing to Pay:</strong> ${center.get(wtp_col, 0):.2f}/kg H2</p>
-                <p><strong>🧪 H2 Purity Required:</strong> {center.get('h2_purity_requirement', center.get('quality_requirement', 99)):.1f}%</p>
-                <p><strong>🌱 CO2 Reduction Target:</strong> {center.get('carbon_reduction_target', center.get('co2_reduction_target', 0)):,.0f} tons/year</p>
-                <p><strong>📋 Contract Length:</strong> {center.get('contract_length_years', center.get('contract_duration', 0))} years</p>
-                <p><strong>🚢 Port Proximity:</strong> {center.get('port_proximity', 'N/A'):.0f} km</p>
+        for idx, center in demand_data.iterrows():
+            # Create detailed popup
+            popup_html = f"""
+            <div style="width: 300px;">
+                <h4>🏭 {center['name']}</h4>
+                <hr>
+                <b>🏭 H2 Industry:</b> {center['industry']}<br>
+                <b>📊 Annual H2 Demand:</b> {center.get(demand_col, 0):,.0f} tons/year<br>
+                <b>📈 H2 Supply Gap:</b> {center.get(supply_gap_col, 0):,.0f} tons/year<br>
+                <b>🌿 Green H2 Preference:</b> {'✅ Yes' if center.get('green_h2_preference', False) else '❌ No'}<br>
+                <b>💰 Willing to Pay:</b> ${center.get(wtp_col, 0):.2f}/kg H2<br>
+                <b>🧪 H2 Purity Required:</b> {center.get('h2_purity_requirement', center.get('quality_requirement', 99)):.1f}%<br>
+                <b>🌱 CO2 Reduction Target:</b> {center.get('carbon_reduction_target', center.get('co2_reduction_target', 0)):,.0f} tons/year<br>
+                <b>📋 Contract Length:</b> {center.get('contract_length_years', center.get('contract_duration', 0))} years<br>
+                <b>🚢 Port Proximity:</b> {center.get('port_proximity', 'N/A'):.0f} km
             </div>
             """
 
-            # Different marker shapes for export vs domestic
-            icon_type = 'ship' if 'Export' in center['industry'] else 'industry'
+            # Color based on priority
+            color = 'red' if center.get('priority', 'Medium') == 'High' else 'lightred'
 
+            # Add marker to map
             folium.Marker(
                 location=[center['latitude'], center['longitude']],
-                popup=folium.Popup(popup_content, max_width=370),
-                tooltip=f"{icon_emoji} {center['name']} - {center['industry']}",
-                icon=folium.Icon(
-                    color=color,
-                    icon=icon_type,
-                    prefix='fa'
-                )
-            ).add_to(h2_demand_fg)
+                popup=folium.Popup(popup_html, max_width=400),
+                tooltip=f"{center['name']} ({center.get(demand_col, 0):,.0f} tons/year)",
+                icon=folium.Icon(color=color, icon='industry', prefix='fa')
+            ).add_to(folium_map)
 
-        h2_demand_fg.add_to(m)
-        return m
-
-    def add_optimization_results(self, m, optimization_results: List[Dict]):
-        """Add H2-optimized site recommendations"""
-
+    def add_optimization_results(self, folium_map, optimization_results: List[Dict]):
+        """Add AI-recommended sites to the map"""
         if not optimization_results:
-            return m
-
-        h2_recommendations_fg = folium.FeatureGroup(name='🌟 AI-Recommended H2 Sites')
+            return
 
         for i, site in enumerate(optimization_results):
-            # H2-SPECIFIC RECOMMENDATION POPUP
-            popup_content = f"""
-            <div style="width: 360px; font-family: Arial, sans-serif;">
-                <h4 style="color: #32CD32; margin-bottom: 10px;">
-                    🌟 {site['name']}
-                </h4>
-                <hr style="margin: 8px 0;">
-                <p><strong>🏆 Optimization Rank:</strong> #{i + 1}</p>
-                <p><strong>🔋 H2 Production Capacity:</strong> {site['capacity']:.1f} MW</p>
-                <p><strong>💰 Estimated Investment:</strong> ${site['estimated_cost']:.1f}M</p>
-                <p><strong>📊 Optimization Score:</strong> {site['score']:.3f}</p>
-                <p><strong>🌿 Expected H2 Production:</strong> {site.get('annual_h2_production', site['capacity'] * 0.5 * 8760 * 0.05):,.0f} tons/year</p>
-                <p><strong>⚡ Distance to Renewable:</strong> {site.get('distance_to_renewable', 0):.1f} km</p>
-                <p><strong>🏭 H2 Demand Accessibility:</strong> {site.get('demand_score', 0):.3f}</p>
-                <p><strong>♻️ Renewable Energy Access:</strong> {site.get('renewable_score', 0):.3f}</p>
-                <p><strong>🌱 CO2 Reduction Potential:</strong> {site.get('co2_reduction', site['capacity'] * 8760 * 0.5 * 0.05 * 9):,.0f} tons/year</p>
-                <p><strong>⏱️ Implementation Time:</strong> {site.get('implementation_time', 36)} months</p>
+            # Create detailed popup
+            popup_html = f"""
+            <div style="width: 300px;">
+                <h4>⭐ {site['name']}</h4>
+                <hr>
+                <b>🏆 Optimization Rank:</b> #{i + 1}<br>
+                <b>🔋 H2 Production Capacity:</b> {site['capacity']:.1f} MW<br>
+                <b>💰 Estimated Investment:</b> ${site['estimated_cost']:.1f}M<br>
+                <b>📊 Optimization Score:</b> {site['score']:.3f}<br>
+                <b>🌿 Expected H2 Production:</b> {site.get('annual_h2_production', site['capacity'] * 0.5 * 8760 * 0.05):,.0f} tons/year<br>
+                <b>⚡ Distance to Renewable:</b> {site.get('distance_to_renewable', 0):.1f} km<br>
+                <b>🏭 H2 Demand Accessibility:</b> {site.get('demand_score', 0):.3f}<br>
+                <b>♻️ Renewable Energy Access:</b> {site.get('renewable_score', 0):.3f}<br>
+                <b>🌱 CO2 Reduction Potential:</b> {site.get('co2_reduction', site['capacity'] * 8760 * 0.5 * 0.05 * 9):,.0f} tons/year<br>
+                <b>⏱️ Implementation Time:</b> {site.get('implementation_time', 36)} months
             </div>
             """
 
-            # Create star marker for recommendations
+            # Add star marker for recommended sites
             folium.Marker(
                 location=[site['latitude'], site['longitude']],
-                popup=folium.Popup(popup_content, max_width=400),
-                tooltip=f"🌟 H2 Recommendation #{i + 1}: {site['name']} (Score: {site['score']:.3f})",
-                icon=folium.Icon(
-                    color='lightgreen',
-                    icon='star',
-                    prefix='fa'
-                )
-            ).add_to(h2_recommendations_fg)
+                popup=folium.Popup(popup_html, max_width=400),
+                tooltip=f"⭐ {site['name']} (Score: {site['score']:.3f})",
+                icon=folium.Icon(color='purple', icon='star', prefix='fa')
+            ).add_to(folium_map)
 
-            # H2 supply radius circle
-            folium.Circle(
+    def add_feasibility_sites(self, folium_map, feasibility_data: pd.DataFrame, max_sites: int = 100):
+        """Add high feasibility sites to the map (sampled for performance)"""
+        if feasibility_data.empty:
+            return
+
+        # Sample data for performance (show only top sites)
+        if len(feasibility_data) > max_sites:
+            # Show top feasibility sites
+            sample_data = feasibility_data.nlargest(max_sites, 'feasibility_score')
+        else:
+            sample_data = feasibility_data
+
+        # Create feature group for feasibility sites
+        fg = folium.FeatureGroup(name="High Feasibility Sites")
+
+        for idx, site in sample_data.iterrows():
+            # Create detailed popup
+            popup_html = f"""
+            <div style="width: 300px;">
+                <h4>🎯 {site['name']}</h4>
+                <hr>
+                <b>📊 Feasibility Score:</b> {site['feasibility_score']:.3f}<br>
+                <b>🌿 H2 Production:</b> {site['h2_production_daily']:.1f} kg/day<br>
+                <b>⚡ Total Capacity:</b> {site['capacity']:.1f} kW<br>
+                <b>🔋 Solar Power:</b> {site['pv_power']:.1f} kW<br>
+                <b>💨 Wind Power:</b> {site['wind_power']:.1f} kW<br>
+                <b>🌡️ Temperature:</b> {site['temperature']:.1f}°C<br>
+                <b>💨 Wind Speed:</b> {site['wind_speed']:.1f} m/s<br>
+                <b>⚙️ System Efficiency:</b> {site['system_efficiency']:.1f}%<br>
+                <b>💧 Desalination Power:</b> {site['desalination_power']:.1f} kW
+            </div>
+            """
+
+            # Color based on feasibility score
+            if site['feasibility_score'] >= 0.95:
+                color = 'darkgreen'
+            elif site['feasibility_score'] >= 0.90:
+                color = 'green'
+            else:
+                color = 'lightgreen'
+
+            # Add circle marker (smaller footprint)
+            folium.CircleMarker(
                 location=[site['latitude'], site['longitude']],
-                radius=site.get('h2_supply_radius', 75000),  # 75km H2 supply radius
-                popup=f"H2 Supply Coverage Area - {site['name']}",
-                color='lightgreen',
+                popup=folium.Popup(popup_html, max_width=400),
+                tooltip=f"{site['name']} (Score: {site['feasibility_score']:.3f})",
+                radius=max(3, min(8, site['feasibility_score'] * 8)),  # Size based on score
+                color=color,
+                fillColor=color,
                 weight=2,
-                fill=True,
-                fillOpacity=0.1,
-                tooltip=f"H2 Supply Area: {site.get('h2_supply_radius', 75):.0f}km radius"
-            ).add_to(h2_recommendations_fg)
+                fillOpacity=0.7
+            ).add_to(fg)
 
-        h2_recommendations_fg.add_to(m)
+        fg.add_to(folium_map)
 
-        # Add comprehensive layer control
-        folium.LayerControl(collapsed=False, position='topright').add_to(m)
-
-        # Add custom legend
-        legend_html = '''
+    def add_legend(self, folium_map):
+        """Add legend to the map"""
+        legend_html = """
         <div style="position: fixed; 
-                    bottom: 50px; left: 50px; width: 200px; height: 160px; 
+                    top: 10px; left: 50px; width: 200px; height: 180px; 
                     background-color: white; border:2px solid grey; z-index:9999; 
-                    font-size:12px; padding: 10px;
-                    border-radius: 10px;
-                    ">
-        <h4 style="margin-bottom: 10px; color: #2E8B57;">🌿 H2 Infrastructure Legend</h4>
-        <p><span style="color: green;">●</span> Existing H2 Plants</p>
-        <p><span style="color: darkgreen;">●</span> Planned H2 Megaplants</p>
-        <p><span style="color: blue;">●</span> H2 Storage Hubs</p>
-        <p><span style="color: orange;">●</span> Renewable-to-H2</p>
-        <p><span style="color: red;">●</span> H2 Demand Centers</p>
-        <p><span style="color: lightgreen;">★</span> AI Recommended Sites</p>
+                    font-size:14px; padding: 10px">
+        <h4>🗺️ Map Legend</h4>
+        <i class="fa fa-leaf" style="color:green"></i> Existing H2 Plants<br>
+        <i class="fa fa-cog" style="color:darkgreen"></i> Planned H2 Megaplants<br>
+        <i class="fa fa-tint" style="color:blue"></i> H2 Storage Hubs<br>
+        <i class="fa fa-sun-o" style="color:orange"></i> Renewable-to-H2<br>
+        <i class="fa fa-industry" style="color:red"></i> H2 Demand Centers<br>
+        <i class="fa fa-star" style="color:purple"></i> AI Recommended Sites
         </div>
-        '''
-        m.get_root().html.add_child(folium.Element(legend_html))
-
-        return m
+        """
+        folium_map.get_root().html.add_child(folium.Element(legend_html))

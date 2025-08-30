@@ -10,11 +10,76 @@ class DataLoader:
         self.regions = ['North', 'South', 'East', 'West', 'Central']
         self.h2_renewable_types = ['Solar', 'Wind', 'Hydro']
 
+    def load_feasibility_data(self, csv_file_path: str = 'Hydro_74K.csv') -> pd.DataFrame:
+        """Load real-world H2 feasibility data from CSV"""
+        try:
+            df = pd.read_csv(csv_file_path)
+
+            # Rename columns to match the project structure
+            df_processed = df.copy()
+            df_processed = df_processed.rename(columns={
+                'City': 'site_id',
+                'Latitude': 'latitude',
+                'Longitude': 'longitude',
+                'Solar_Irradiance_kWh/m²/day': 'solar_irradiance',
+                'Temperature_C': 'temperature',
+                'Wind_Speed_m/s': 'wind_speed',
+                'PV_Power_kW': 'pv_capacity',
+                'Wind_Power_kW': 'wind_capacity',
+                'Electrolyzer_Efficiency_%': 'electrolyzer_efficiency',
+                'Hydrogen_Production_kg/day': 'h2_production_daily',
+                'Desalination_Power_kW': 'desalination_power',
+                'System_Efficiency_%': 'system_efficiency',
+                'Feasibility_Score': 'feasibility_score'
+            })
+
+            # Add derived columns for integration
+            df_processed['name'] = 'H2 Site ' + df_processed['site_id'].astype(str)
+            df_processed['type'] = 'feasible_site'
+            df_processed['capacity'] = df_processed['pv_capacity'] + df_processed['wind_capacity']  # Total MW
+            df_processed['annual_h2_production'] = df_processed['h2_production_daily'] * 365 / 1000  # tons/year
+            df_processed['status'] = 'feasible'
+            df_processed['technology'] = 'PEM Electrolysis'
+            df_processed['production_type'] = 'Green'
+            df_processed['renewable_powered'] = True
+            df_processed['carbon_intensity'] = 0.0  # kg CO2/kg H2 for green H2
+
+            # Estimate investment cost based on capacity
+            np.random.seed(42)
+            df_processed['investment_cost'] = df_processed['capacity'] * np.random.uniform(2.5, 4.0, len(df_processed))
+
+            # Add region classification based on coordinates
+            df_processed['region'] = df_processed.apply(self._classify_region, axis=1)
+
+            print(f"✅ Loaded {len(df_processed)} feasibility sites from {csv_file_path}")
+            return df_processed
+
+        except FileNotFoundError:
+            print(f"❌ Error: {csv_file_path} not found")
+            return pd.DataFrame()
+        except Exception as e:
+            print(f"❌ Error loading feasibility data: {e}")
+            return pd.DataFrame()
+
+    def _classify_region(self, row):
+        """Classify sites into regions based on coordinates"""
+        lat, lon = row['latitude'], row['longitude']
+
+        if lat > 25 and lon < -10:
+            return 'North Atlantic'
+        elif lat > 25 and lon >= -10:
+            return 'Northeast'
+        elif 20 <= lat <= 25 and lon < -10:
+            return 'West Atlantic'
+        elif 20 <= lat <= 25 and lon >= -10:
+            return 'Central'
+        else:
+            return 'South'
+
     def load_infrastructure_data(self) -> pd.DataFrame:
         """Load H2-focused infrastructure data"""
         np.random.seed(42)
         random.seed(42)
-
         data = []
 
         # H2 PRODUCTION FACILITIES
@@ -88,13 +153,11 @@ class DataLoader:
     def load_renewable_sources(self) -> pd.DataFrame:
         """Load renewable sources optimized for H2 production"""
         np.random.seed(43)
-
         data = []
 
         # SOLAR FARMS FOR H2
         for i in range(30):
             dedicated_h2 = np.random.choice([True, False], p=[0.4, 0.6])
-
             data.append({
                 'id': f'solar_h2_{i}',
                 'name': f'Solar-to-H2 Farm {i + 1}',
@@ -116,7 +179,6 @@ class DataLoader:
         # WIND FARMS FOR H2
         for i in range(25):
             dedicated_h2 = np.random.choice([True, False], p=[0.35, 0.65])
-
             data.append({
                 'id': f'wind_h2_{i}',
                 'name': f'Wind-to-H2 Farm {i + 1}',

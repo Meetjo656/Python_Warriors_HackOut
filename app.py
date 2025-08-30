@@ -29,11 +29,12 @@ try:
     FOLIUM_INTERACTIVE = True
 except ImportError:
     FOLIUM_INTERACTIVE = False
-    import streamlit.components.v1 as components
+
+import streamlit.components.v1 as components
 
 
-def display_map(folium_map, width=700, height=500):
-    """Display map with fallback options"""
+def display_folium_map(folium_map, width=700, height=500):
+    """Display Folium map with fallback options"""
     if FOLIUM_INTERACTIVE:
         try:
             return st_folium(folium_map, width=width, height=height, returned_objects=["last_object_clicked"])
@@ -52,12 +53,9 @@ def display_static_map(folium_map, width, height):
     return {"last_object_clicked": None}
 
 
-import plotly.graph_objects as go
-import numpy as np
-import pandas as pd
-
-
-def create_plotly_map(infrastructure_data, renewable_data, demand_data, optimization_results=None):
+def create_plotly_map(infrastructure_data, renewable_data, demand_data, feasibility_data=None,
+                      optimization_results=None):
+    """Create interactive Plotly map"""
     fig = go.Figure()
 
     # Color mapping for trace categories
@@ -67,8 +65,48 @@ def create_plotly_map(infrastructure_data, renewable_data, demand_data, optimiza
         'storage': 'blue',
         'renewable': 'orange',
         'demand': 'red',
-        'recommended': 'lime'
+        'recommended': 'lime',
+        'feasible_site': 'purple'
     }
+
+    # Add feasibility sites (from Hydro_74K.csv) with sampling for performance
+    if feasibility_data is not None and not feasibility_data.empty:
+        # Sample data for better performance (max 1000 points)
+        if len(feasibility_data) > 1000:
+            sample_data = feasibility_data.sample(n=1000, random_state=42)
+        else:
+            sample_data = feasibility_data
+
+        fig.add_trace(go.Scattermapbox(
+            lat=sample_data['latitude'],
+            lon=sample_data['longitude'],
+            mode='markers',
+            marker=dict(
+                size=6,
+                color=sample_data['feasibility_score'],
+                colorscale='Viridis',
+                colorbar=dict(title="Feasibility Score"),
+                cmin=sample_data['feasibility_score'].min(),
+                cmax=sample_data['feasibility_score'].max(),
+                opacity=0.8
+            ),
+            text=sample_data['name'],
+            name='High Feasibility Sites',
+            customdata=np.column_stack((
+                sample_data['feasibility_score'],
+                sample_data['h2_production_daily'],
+                sample_data['capacity'],
+                sample_data['system_efficiency']
+            )),
+            hovertemplate=(
+                    "<b>%{text}</b><br>" +
+                    "Feasibility Score: %{customdata[0]:.3f}<br>" +
+                    "H2 Production: %{customdata[1]:.1f} kg/day<br>" +
+                    "Total Capacity: %{customdata[2]:.1f} kW<br>" +
+                    "System Efficiency: %{customdata[3]:.1f}%<br>" +
+                    "<extra></extra>"
+            )
+        ))
 
     # Add infrastructure traces
     if not infrastructure_data.empty:
@@ -79,6 +117,7 @@ def create_plotly_map(infrastructure_data, renewable_data, demand_data, optimiza
                 'planned_plant': 'Planned H2 Megaplants',
                 'storage': 'H2 Storage Hubs'
             }
+
             fig.add_trace(go.Scattermapbox(
                 lat=subset['latitude'],
                 lon=subset['longitude'],
@@ -91,151 +130,176 @@ def create_plotly_map(infrastructure_data, renewable_data, demand_data, optimiza
                 hovertemplate=(
                         "<b>%{text}</b><br>" +
                         "Capacity: %{customdata:.1f} MW<br>" +
-                        "Type: " + type_labels.get(infra_type, infra_type) +
+                        "Type: " + type_labels.get(infra_type, infra_type) + "<br>" +
                         "<extra></extra>"
-                ),
+                )
             ))
 
-    # Add renewable energy traces
+    # Add renewable sources
     if not renewable_data.empty:
-        renewable_potential_col = None
-        if 'annual_h2_potential' in renewable_data.columns:
-            renewable_potential_col = 'annual_h2_potential'
-        elif 'potential_h2' in renewable_data.columns:
-            renewable_potential_col = 'potential_h2'
-        elif 'potential_h2_production' in renewable_data.columns:
-            renewable_potential_col = 'potential_h2_production'
-
-        potential_data = renewable_data[renewable_potential_col] if renewable_potential_col else [0] * len(
-            renewable_data)
-
         fig.add_trace(go.Scattermapbox(
             lat=renewable_data['latitude'],
             lon=renewable_data['longitude'],
             mode='markers',
-            marker=dict(size=10, color=colors['renewable'], symbol='circle'),
+            marker=dict(size=8, color=colors['renewable']),
             text=renewable_data['name'],
-            customdata=potential_data,
-            name='Renewable to H2',
+            name='Renewable Sources',
+            customdata=renewable_data['annual_h2_potential'],
             hovertemplate=(
                     "<b>%{text}</b><br>" +
-                    "H2 Potential: %{customdata:,.0f} tons/year" +
+                    "H2 Potential: %{customdata:,.0f} tons/year<br>" +
                     "<extra></extra>"
             )
         ))
 
-    # Add demand points
+    # Add demand centers
     if not demand_data.empty:
-        demand_col = 'annual_h2_demand' if 'annual_h2_demand' in demand_data.columns else 'annual_demand'
         fig.add_trace(go.Scattermapbox(
             lat=demand_data['latitude'],
             lon=demand_data['longitude'],
             mode='markers',
-            marker=dict(size=10, color=colors['demand'], symbol='square'),
+            marker=dict(size=8, color=colors['demand']),
             text=demand_data['name'],
-            customdata=demand_data[demand_col],
-            name='H2 Demand',
+            name='H2 Demand Centers',
+            customdata=demand_data['annual_h2_demand'],
             hovertemplate=(
                     "<b>%{text}</b><br>" +
-                    "Annual Demand: %{customdata:,.0f} tons/year" +
+                    "Annual Demand: %{customdata:,.0f} tons/year<br>" +
                     "<extra></extra>"
             )
         ))
 
     # Add optimization results
     if optimization_results:
-        df_results = pd.DataFrame(optimization_results)
-        # Provide both Score and Investment in a tuple for customdata
-        combined_customdata = list(zip(df_results['score'], df_results['estimated_cost']))
-
+        opt_df = pd.DataFrame(optimization_results)
         fig.add_trace(go.Scattermapbox(
-            lat=df_results['latitude'],
-            lon=df_results['longitude'],
+            lat=opt_df['latitude'],
+            lon=opt_df['longitude'],
             mode='markers',
-            marker=dict(size=14, color=colors['recommended'], symbol='star'),
-            text=df_results['name'],
-            customdata=combined_customdata,
-            name='Recommended H2 Sites',
+            marker=dict(size=12, color=colors['recommended'],
+                        symbol='star'),
+            text=opt_df['name'],
+            name='AI Recommended Sites',
+            customdata=np.column_stack((opt_df['score'], opt_df['estimated_cost'])),
             hovertemplate=(
                     "<b>%{text}</b><br>" +
                     "Score: %{customdata[0]:.3f}<br>" +
-                    "Investment: $%{customdata[1]:.1f} M" +
+                    "Investment: $%{customdata[1]:.1f} M<br>" +
                     "<extra></extra>"
             )
         ))
 
-    # Map layout
+    # Update layout
     fig.update_layout(
         mapbox=dict(
-            style='open-street-map',
-            center=dict(lat=20.5937, lon=78.962),
-            zoom=4,
+            accesstoken=None,  # Using open street map
+            style="open-street-map",
+            center=dict(lat=20.5937, lon=78.9629),  # Center of India
+            zoom=5
         ),
-        margin=dict(l=0, r=0, t=0, b=0),
         height=600,
+        margin=dict(l=0, r=0, t=0, b=0),
+        showlegend=True,
         legend=dict(
-            x=0.01,
+            yanchor="top",
             y=0.99,
-            bgcolor='rgba(255,255,255,0.8)'
+            xanchor="left",
+            x=0.01,
+            bgcolor="rgba(255,255,255,0.8)"
         )
     )
+
     return fig
 
 
-# Custom CSS with H2 theme
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: 700;
-        color: #2E8B57;
-        text-align: center;
-        margin-bottom: 2rem;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
-    }
-    .h2-metric-container {
-        background: linear-gradient(135deg, #f0f8f0, #e8f5e8);
-        padding: 1rem;
-        border-radius: 10px;
-        margin: 0.5rem 0;
-        border-left: 4px solid #2E8B57;
-    }
-    .sidebar .sidebar-content {
-        background-color: #f8fdf8;
-    }
-    .h2-info-box {
-        background-color: #e8f4fd;
-        padding: 15px;
-        border-radius: 8px;
-        border-left: 4px solid #2E8B57;
-        margin: 10px 0;
-    }
-</style>
-""", unsafe_allow_html=True)
+def load_real_feasibility_data():
+    """Load the real feasibility dataset from Hydro_74K.csv"""
+    try:
+        # Load the Hydro_74K.csv file
+        feasibility_data = pd.read_csv('Hydro_74K.csv')
 
-# Main header with H2 focus
-st.markdown('<h1 class="main-header">💚 Green Hydrogen Infrastructure Mapper & Optimizer</h1>', unsafe_allow_html=True)
+        # Rename columns to match expected format
+        feasibility_data = feasibility_data.rename(columns={
+            'City': 'name',
+            'Latitude': 'latitude',
+            'Longitude': 'longitude',
+            'Solar_Irradiance_kWh/m²/day': 'solar_irradiance',
+            'Temperature_C': 'temperature',
+            'Wind_Speed_m/s': 'wind_speed',
+            'PV_Power_kW': 'pv_power',
+            'Wind_Power_kW': 'wind_power',
+            'Electrolyzer_Efficiency_%': 'electrolyzer_efficiency',
+            'Hydrogen_Production_kg/day': 'h2_production_daily',
+            'Desalination_Power_kW': 'desalination_power',
+            'System_Efficiency_%': 'system_efficiency',
+            'Feasibility_Score': 'feasibility_score'
+        })
 
-# Add H2 focus subtitle
-st.markdown("""
-<div style="text-align: center; color: #666; margin-bottom: 30px; font-size: 1.2em;">
-    <strong>AI-Powered Site Selection for Green Hydrogen Production • Renewable Integration • Supply Chain Optimization</strong>
-</div>
-""", unsafe_allow_html=True)
+        # Add required columns for integration
+        feasibility_data['type'] = 'feasible_site'
+        feasibility_data['capacity'] = feasibility_data['pv_power'] + feasibility_data['wind_power']  # Total capacity
+        feasibility_data['annual_h2_production'] = feasibility_data['h2_production_daily'] * 365  # Annual production
+        feasibility_data['region'] = 'Atlantic'  # Based on coordinates
 
-# Display streamlit-folium status
-if FOLIUM_INTERACTIVE:
-    st.success("✅ Interactive maps enabled")
-else:
-    st.warning("⚠️ Using static maps - streamlit-folium not available")
+        return feasibility_data
 
-# Initialize session state
-if 'data_loaded' not in st.session_state:
-    st.session_state.data_loaded = False
-    st.session_state.optimization_run = False
+    except Exception as e:
+        st.error(f"Error loading Hydro_74K.csv: {e}")
+        return pd.DataFrame()
 
 
 def main():
+    st.title("🌿 Green Hydrogen Infrastructure Mapper & Optimizer")
+    st.markdown("""
+    **Green hydrogen** is produced using renewable electricity to split water through electrolysis, 
+    creating zero-emission hydrogen for industrial applications, transportation, and energy storage.
+
+    **Load the H2 sample data** to explore real feasibility analysis of 74,000+ sites 
+    and see AI-powered optimization recommendations.
+    """)
+
+    # Sidebar Configuration
+    st.sidebar.header("🔬 Data Source Selection")
+    use_real_data = st.sidebar.checkbox("Include Real Feasibility Data (74K sites)", value=True)
+
+    # Map type selection
+    st.sidebar.subheader("🗺️ Map Display Options")
+    map_type = st.sidebar.radio(
+        "Choose Map Type:",
+        ["📊 Interactive Plotly Map", "🍃 Folium Map (detailed popups)"],
+        index=0
+    )
+
+    # Show Folium availability status
+    if FOLIUM_INTERACTIVE:
+        st.sidebar.success("✅ Folium maps available")
+    else:
+        st.sidebar.warning("⚠️ Folium not available\n`pip install streamlit-folium folium`")
+
+    feasibility_data = pd.DataFrame()
+    if use_real_data:
+        st.sidebar.info("📊 Using integrated real feasibility data from Hydro_74K.csv")
+        feasibility_data = load_real_feasibility_data()
+
+        if not feasibility_data.empty:
+            st.sidebar.success(f"✅ Loaded {len(feasibility_data)} feasibility sites")
+
+            # Add feasibility filter
+            min_feasibility = st.sidebar.slider(
+                "Minimum Feasibility Score",
+                min_value=float(feasibility_data['feasibility_score'].min()),
+                max_value=float(feasibility_data['feasibility_score'].max()),
+                value=0.92,
+                step=0.01
+            )
+
+            # Filter feasibility data
+            feasibility_data = feasibility_data[feasibility_data['feasibility_score'] >= min_feasibility]
+            st.sidebar.info(f"🎯 Showing {len(feasibility_data)} sites above {min_feasibility} feasibility score")
+        else:
+            st.sidebar.error("❌ Could not load Hydro_74K.csv")
+            use_real_data = False
+
     # Initialize components
     data_loader = DataLoader()
     map_builder = MapBuilder()
@@ -243,355 +307,383 @@ def main():
     analyzer = CostAnalyzer()
     visualizer = Visualizer()
 
-    # Sidebar controls
-    st.sidebar.title("🔧 H2 Infrastructure Analysis")
-    st.sidebar.markdown("---")
+    # Main tabs
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "🗺️ Infrastructure Map", "📊 Data Analysis", "🎯 Site Optimization",
+        "💰 Cost Analysis", "📈 Visualizations"
+    ])
 
-    # Load data button
-    if st.sidebar.button("🔄 Load H2 Sample Data"):
-        with st.spinner("Loading hydrogen infrastructure data..."):
-            st.session_state.infrastructure_data = data_loader.load_infrastructure_data()
-            st.session_state.renewable_data = data_loader.load_renewable_sources()
-            st.session_state.demand_data = data_loader.load_demand_centers()
-            st.session_state.data_loaded = True
-        st.sidebar.success("H2 data loaded successfully!")
+    # Load data
+    with st.spinner("Loading hydrogen infrastructure data..."):
+        try:
+            infrastructure_data = data_loader.load_infrastructure_data()
+            renewable_data = data_loader.load_renewable_sources()
+            demand_data = data_loader.load_demand_centers()
+        except Exception as e:
+            st.error(f"Error loading data: {e}")
+            st.stop()
 
-    if not st.session_state.data_loaded:
-        # H2-focused information
-        st.markdown("""
-        <div class="h2-info-box">
-            <h3 style="color:blue;">🌿 About Green Hydrogen Infrastructure Mapping</h3>
-            <p style="color:blue"><strong>Green hydrogen</strong> is produced using renewable electricity to split water through electrolysis, 
-            creating zero-emission hydrogen for industrial applications, transportation, and energy storage.</p>
-
-            <h4>🎯 Key H2 Applications Covered:</h4>
-            <ul>
-                <li><strong>🏭 Green Steel Production</strong> - Decarbonizing steel manufacturing with H2</li>
-                <li><strong>🚛 Hydrogen Mobility</strong> - Fuel cell vehicles and H2 refueling stations</li>
-                <li><strong>🌱 Green Ammonia</strong> - Clean fertilizer production and shipping fuel</li>
-                <li><strong>⚡ H2 Power Generation</strong> - Grid-scale hydrogen fuel cells</li>
-                <li><strong>🔋 Energy Storage</strong> - Long-duration renewable energy storage via H2</li>
-                <li><strong>🚢 H2 Export Markets</strong> - International green hydrogen trade</li>
-            </ul>
-
-            <p>👈 <strong>Load the H2 sample data</strong> to explore India's hydrogen infrastructure potential 
-            and see AI-powered optimization recommendations.</p>
-        </div>
-        """, unsafe_allow_html=True)
-        return
-
-    # H2 Optimization parameters
-    st.sidebar.subheader("💰 H2 Investment Parameters")
-    investment_budget = st.sidebar.slider("H2 Investment Budget ($M)", 100, 2000, 500, step=50)
-    max_projects = st.sidebar.slider("Maximum New H2 Projects", 3, 15, 8)
-
-    st.sidebar.subheader("📍 H2 Location Criteria")
-    max_distance_renewable = st.sidebar.slider("Max Distance to Renewable Source (km)", 20, 200, 75, step=5)
-    min_demand_proximity = st.sidebar.slider("Min H2 Demand Proximity Score", 0.1, 1.0, 0.6, step=0.1)
-
-    st.sidebar.subheader("🎯 H2 Priority Weights")
-    weight_cost = st.sidebar.slider("Cost Optimization", 0.0, 1.0, 0.3, step=0.1)
-    weight_renewable = st.sidebar.slider("Renewable Access", 0.0, 1.0, 0.4, step=0.1)
-    weight_demand = st.sidebar.slider("H2 Market Access", 0.0, 1.0, 0.3, step=0.1)
-
-    # Normalize weights
-    total_weight = weight_cost + weight_renewable + weight_demand
-    if total_weight > 0:
-        weight_cost /= total_weight
-        weight_renewable /= total_weight
-        weight_demand /= total_weight
-
-    # Run H2 optimization
-    if st.sidebar.button("🚀 Optimize H2 Sites"):
-        with st.spinner("Optimizing green hydrogen site locations..."):
-            optimization_params = {
-                'budget': investment_budget,
-                'max_projects': max_projects,
-                'max_distance_renewable': max_distance_renewable,
-                'min_demand_proximity': min_demand_proximity,
-                'weights': {'cost': weight_cost, 'renewable': weight_renewable, 'demand': weight_demand}
-            }
-
-            st.session_state.optimization_results = optimizer.optimize_sites(
-                st.session_state.infrastructure_data,
-                st.session_state.renewable_data,
-                st.session_state.demand_data,
-                optimization_params
-            )
-            st.session_state.optimization_run = True
-        st.sidebar.success("H2 optimization completed!")
-
-    # Main content tabs
-    tab1, tab2, tab3, tab4 = st.tabs(
-        ["🗺️ H2 Infrastructure Map", "📊 H2 Analytics", "💡 H2 Recommendations", "💰 H2 Economics"])
-
+    # TAB 1: Infrastructure Map
     with tab1:
-        col1, col2 = st.columns([3, 1])
+        st.header("🗺️ Green Hydrogen Infrastructure Map")
 
-        with col1:
-            st.subheader("🌿 Green Hydrogen Infrastructure Mapping")
-
-            # Choose map type
-            map_type = st.radio("Select Map Visualization:", ["Interactive H2 Map (Folium)", "Static H2 Map (Plotly)"],
-                                horizontal=True)
-
-            if map_type == "Interactive H2 Map (Folium)" and FOLIUM_INTERACTIVE:
-                # Create Folium map
-                m = map_builder.create_base_map()
-                m = map_builder.add_infrastructure_layer(m, st.session_state.infrastructure_data)
-                m = map_builder.add_renewable_layer(m, st.session_state.renewable_data)
-                m = map_builder.add_demand_layer(m, st.session_state.demand_data)
-
-                if st.session_state.optimization_run:
-                    m = map_builder.add_optimization_results(m, st.session_state.optimization_results)
-
-                map_data = display_map(m, width=700, height=600)
-
-            else:
-                # Use Plotly map
-                optimization_results = st.session_state.optimization_results if st.session_state.optimization_run else None
-                plotly_fig = create_plotly_map(
-                    st.session_state.infrastructure_data,
-                    st.session_state.renewable_data,
-                    st.session_state.demand_data,
-                    optimization_results
-                )
-                st.plotly_chart(plotly_fig, use_container_width=True)
+        # Map options
+        col1, col2 = st.columns([2, 1])
 
         with col2:
-            st.subheader("H2 Map Legend")
-            legend_html = """
-            <div style="background-color: white; padding: 15px; border-radius: 8px; border: 1px solid #ddd;">
-            <h4 style="color: #2E8B57; margin-bottom: 15px;">🌿 Hydrogen Infrastructure</h4>
+            st.subheader("Map Controls")
+            show_infrastructure = st.checkbox("Show Infrastructure", value=True)
+            show_renewable = st.checkbox("Show Renewable Sources", value=True)
+            show_demand = st.checkbox("Show Demand Centers", value=True)
+            show_feasibility = st.checkbox("Show Feasibility Sites", value=use_real_data)
 
-            <div style="margin-bottom: 12px;">
-                <span style="color: green; font-size: 18px;">●</span> 
-                <strong style="color:black;">Existing H2 Plants</strong><br>
-                <small style="margin-left: 20px; color: #666;">Operational hydrogen production facilities</small>
-            </div>
+            if st.button("🔄 Refresh Map"):
+                st.rerun()
 
-            <div style="margin-bottom: 12px;">
-                <span style="color: darkgreen; font-size: 18px;">●</span> 
-                <strong style="color:black;">Planned H2 Megaplants</strong><br>
-                <small style="margin-left: 20px; color: #666;">Future large-scale green H2 facilities</small>
-            </div>
+        with col1:
+            # Display map based on selection
+            try:
+                if map_type == "📊 Interactive Plotly Map":
+                    st.subheader("📍 Interactive Plotly Map")
+                    fig = create_plotly_map(
+                        infrastructure_data if show_infrastructure else pd.DataFrame(),
+                        renewable_data if show_renewable else pd.DataFrame(),
+                        demand_data if show_demand else pd.DataFrame(),
+                        feasibility_data if show_feasibility else pd.DataFrame()
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
 
-            <div style="margin-bottom: 12px;">
-                <span style="color: blue; font-size: 18px;">●</span> 
-                <strong style="color:black;">H2 Storage Hubs</strong><br>
-                <small style="margin-left: 20px; color: #666;">Hydrogen storage and distribution centers</small>
-            </div>
+                elif map_type == "🍃 Folium Map (detailed popups)":
+                    if FOLIUM_INTERACTIVE:
+                        st.subheader("🍃 Interactive Folium Map")
+                        # Create Folium map
+                        folium_map = map_builder.create_base_map()
 
-            <div style="margin-bottom: 12px;">
-                <span style="color: orange; font-size: 18px;">●</span> 
-                <strong style="color:black;">Renewable-to-H2 Sources</strong><br>
-                <small style="margin-left: 20px; color: #666;">Solar/Wind farms for hydrogen production</small>
-            </div>
+                        # Add data layers to Folium map
+                        if show_infrastructure and not infrastructure_data.empty:
+                            map_builder.add_infrastructure(folium_map, infrastructure_data)
 
-            <div style="margin-bottom: 12px;">
-                <span style="color: red; font-size: 18px;">●</span> 
-                <strong style="color:black;">H2 Demand Centers</strong><br>
-                <small style="margin-left: 20px; color: #666;">Industries requiring hydrogen supply</small>
-            </div>
+                        if show_renewable and not renewable_data.empty:
+                            map_builder.add_renewable_sources(folium_map, renewable_data)
 
-            <div style="margin-bottom: 12px;">
-                <span style="color: lightgreen; font-size: 18px;">★</span> 
-                <strong style="color:black;">AI-Recommended H2 Sites</strong><br>
-                <small style="margin-left: 20px; color: #666;">Optimized locations for new H2 plants</small>
-            </div>
+                        if show_demand and not demand_data.empty:
+                            map_builder.add_demand_centers(folium_map, demand_data)
 
-            <hr style="margin: 15px 0;">
-            <h5 style="color: #2E8B57; margin-bottom: 10px;">🎯 H2 Industry Focus:</h5>
-            <div style="font-size: 12px; color: #555;">
-                • 🏭 Green Steel Production<br>
-                • 🚛 Hydrogen Mobility & Transport<br>
-                • 🌱 Green Ammonia Production<br>
-                • ⚡ H2 Fuel Cells & Power<br>
-                • 🚢 Green H2 Export<br>
-                • 🏭 Industrial H2 Applications
-            </div>
-            </div>
-            """
-            st.markdown(legend_html, unsafe_allow_html=True)
+                        # Add feasibility sites if enabled
+                        if show_feasibility and not feasibility_data.empty:
+                            map_builder.add_feasibility_sites(folium_map, feasibility_data, max_sites=50)
 
-            # H2-SPECIFIC STATISTICS
-            st.subheader("Current H2 Infrastructure")
-            if st.session_state.data_loaded:
-                existing_h2_plants = len(st.session_state.infrastructure_data[
-                                             st.session_state.infrastructure_data['type'] == 'existing_plant'])
-                planned_h2_plants = len(st.session_state.infrastructure_data[
-                                            st.session_state.infrastructure_data['type'] == 'planned_plant'])
-                h2_storage_hubs = len(st.session_state.infrastructure_data[
-                                          st.session_state.infrastructure_data['type'] == 'storage'])
+                        # Add legend
+                        map_builder.add_legend(folium_map)
 
-                # H2-focused metrics
-                total_h2_capacity = st.session_state.infrastructure_data['capacity'].sum()
-                green_h2_sources = len(st.session_state.renewable_data[
-                                           st.session_state.renewable_data.get('dedicated_h2_production',
-                                                                               False) == True])
-                h2_demand_centers = len(st.session_state.demand_data)
+                        # Display Folium map
+                        display_folium_map(folium_map, width=700, height=500)
 
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("H2 Plants (Existing)", existing_h2_plants, delta="Operational")
-                    st.metric("H2 Megaplants (Planned)", planned_h2_plants, delta="Future")
-                    st.metric("H2 Storage Hubs", h2_storage_hubs)
+                    else:
+                        st.warning("🍃 Folium not available. Install with: `pip install streamlit-folium folium`")
+                        st.info("Falling back to Plotly map...")
+                        fig = create_plotly_map(
+                            infrastructure_data if show_infrastructure else pd.DataFrame(),
+                            renewable_data if show_renewable else pd.DataFrame(),
+                            demand_data if show_demand else pd.DataFrame(),
+                            feasibility_data if show_feasibility else pd.DataFrame()
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
 
-                with col2:
-                    st.metric("Total H2 Capacity", f"{total_h2_capacity:,.0f} MW")
-                    st.metric("Renewable-H2 Projects", green_h2_sources, delta="Dedicated")
-                    st.metric("H2 Demand Centers", h2_demand_centers)
+            except Exception as e:
+                st.error(f"Error creating map: {e}")
+                st.info("Displaying basic information instead...")
 
-                # Additional H2 metrics
-                if not st.session_state.infrastructure_data.empty:
-                    green_capacity = st.session_state.infrastructure_data[
-                        st.session_state.infrastructure_data.get('production_type', '') == 'Green']['capacity'].sum()
-                    green_percentage = (green_capacity / total_h2_capacity * 100) if total_h2_capacity > 0 else 0
+                if show_infrastructure:
+                    st.write("**Infrastructure Data Sample:**")
+                    st.dataframe(infrastructure_data.head())
 
-                    st.metric("Green H2 Share", f"{green_percentage:.1f}%",
-                              delta="of total capacity", delta_color="normal")
+        # Map Statistics
+        st.subheader("📊 Map Statistics")
+        stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
 
+        with stat_col1:
+            st.metric("Infrastructure Sites", len(infrastructure_data))
+        with stat_col2:
+            st.metric("Renewable Sources", len(renewable_data))
+        with stat_col3:
+            st.metric("Demand Centers", len(demand_data))
+        with stat_col4:
+            if use_real_data and not feasibility_data.empty:
+                st.metric("High Feasibility Sites", len(feasibility_data))
+
+    # TAB 2: Data Analysis
     with tab2:
-        st.subheader("📊 H2 Infrastructure Analytics Dashboard")
+        st.header("📊 Data Analysis")
 
         col1, col2 = st.columns(2)
 
         with col1:
-            # H2 capacity chart
-            fig = visualizer.create_h2_capacity_chart(st.session_state.infrastructure_data)
-            st.plotly_chart(fig, use_container_width=True)
+            st.subheader("Infrastructure Capacity")
+            if not infrastructure_data.empty:
+                fig = visualizer.create_capacity_chart(infrastructure_data)
+                st.plotly_chart(fig, use_container_width=True)
 
-            # H2 production methods
-            fig = visualizer.create_h2_production_methods_chart(st.session_state.infrastructure_data)
-            st.plotly_chart(fig, use_container_width=True)
+            st.subheader("Regional Distribution")
+            if not infrastructure_data.empty:
+                fig = visualizer.create_regional_distribution(infrastructure_data)
+                st.plotly_chart(fig, use_container_width=True)
 
         with col2:
-            # H2 demand analysis
-            fig = visualizer.create_h2_demand_analysis(st.session_state.demand_data)
+            st.subheader("H2 Demand Analysis")
+            if not demand_data.empty:
+                fig = visualizer.create_demand_analysis(demand_data)
+                st.plotly_chart(fig, use_container_width=True)
+
+            st.subheader("Production Methods")
+            if not infrastructure_data.empty:
+                fig = visualizer.create_h2_production_methods_chart(infrastructure_data)
+                st.plotly_chart(fig, use_container_width=True)
+
+        # Feasibility Data Analysis
+        if use_real_data and not feasibility_data.empty:
+            st.subheader("🎯 Feasibility Analysis (Real Data from Hydro_74K)")
+
+            feas_col1, feas_col2, feas_col3 = st.columns(3)
+
+            with feas_col1:
+                st.metric(
+                    "Average Feasibility Score",
+                    f"{feasibility_data['feasibility_score'].mean():.3f}",
+                    f"{feasibility_data['feasibility_score'].std():.3f} std"
+                )
+
+            with feas_col2:
+                st.metric(
+                    "Total H2 Production Potential",
+                    f"{feasibility_data['h2_production_daily'].sum():.0f} kg/day"
+                )
+
+            with feas_col3:
+                st.metric(
+                    "Average System Efficiency",
+                    f"{feasibility_data['system_efficiency'].mean():.1f}%"
+                )
+
+            # Feasibility distribution chart
+            fig = px.histogram(
+                feasibility_data,
+                x='feasibility_score',
+                nbins=50,
+                title='Distribution of Feasibility Scores',
+                labels={'feasibility_score': 'Feasibility Score', 'count': 'Number of Sites'},
+                color_discrete_sequence=['#2E8B57'],
+                opacity=0.8
+            )
+            fig.update_layout(
+                xaxis_title="Feasibility Score",
+                yaxis_title="Number of Sites",
+                title_x=0.5,
+                showlegend=False
+            )
             st.plotly_chart(fig, use_container_width=True)
 
-            # Renewable H2 potential
-            fig = visualizer.create_renewable_h2_potential_chart(st.session_state.renewable_data)
-            st.plotly_chart(fig, use_container_width=True)
-
-        # H2-specific KPIs
-        st.subheader("🎯 Key H2 Infrastructure Metrics")
-
-        if st.session_state.data_loaded:
-            col1, col2, col3, col4 = st.columns(4)
-
-            # Calculate H2-specific metrics
-            total_h2_production = st.session_state.infrastructure_data.get('annual_h2_production', pd.Series([0])).sum()
-            total_h2_demand = st.session_state.demand_data.get('annual_h2_demand', pd.Series([0])).sum()
-            h2_supply_gap = st.session_state.demand_data.get('h2_supply_gap', pd.Series([0])).sum()
-            green_h2_plants = len(st.session_state.infrastructure_data[
-                                      st.session_state.infrastructure_data.get('production_type', '') == 'Green'])
-
-            with col1:
-                st.metric(
-                    "Total H2 Production",
-                    f"{total_h2_production:,.0f} tons/year",
-                    delta="Current capacity"
-                )
-
-            with col2:
-                st.metric(
-                    "Total H2 Demand",
-                    f"{total_h2_demand:,.0f} tons/year",
-                    delta="Market requirement"
-                )
-
-            with col3:
-                st.metric(
-                    "H2 Supply Gap",
-                    f"{h2_supply_gap:,.0f} tons/year",
-                    delta="Investment opportunity",
-                    delta_color="inverse"
-                )
-
-            with col4:
-                st.metric(
-                    "Green H2 Plants",
-                    f"{green_h2_plants}",
-                    delta="Zero-emission facilities",
-                    delta_color="normal"
-                )
-
+    # TAB 3: Site Optimization
     with tab3:
-        if st.session_state.optimization_run:
-            st.subheader("🎯 H2 Site Optimization Results")
+        st.header("🎯 Site Optimization")
 
-            results = st.session_state.optimization_results
+        # Optimization parameters
+        col1, col2 = st.columns([1, 2])
 
-            # Key H2 metrics
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Recommended H2 Sites", len(results))
-            with col2:
-                total_investment = sum([site['estimated_cost'] for site in results])
-                st.metric("Total H2 Investment", f"${total_investment:.1f}M")
-            with col3:
-                total_capacity = sum([site['capacity'] for site in results])
-                st.metric("Total H2 Capacity", f"{total_capacity:.1f} MW")
-            with col4:
-                avg_score = np.mean([site['score'] for site in results])
-                st.metric("Avg. Optimization Score", f"{avg_score:.3f}")
+        with col1:
+            st.subheader("Optimization Parameters")
+            budget = st.slider("Budget (Million $)", 500, 5000, 2000, 100)
+            max_projects = st.slider("Max Projects", 3, 20, 8)
 
-            # Detailed H2 recommendations
-            st.subheader("📋 H2 Site Recommendations")
+            st.subheader("Priority Weights")
+            weight_cost = st.slider("Cost Weight", 0.0, 1.0, 0.3, 0.1)
+            weight_renewable = st.slider("Renewable Access Weight", 0.0, 1.0, 0.4, 0.1)
+            weight_demand = st.slider("Demand Proximity Weight", 0.0, 1.0, 0.3, 0.1)
 
-            recommendations_df = pd.DataFrame(results)
-            recommendations_df = recommendations_df.round(3)
+            optimize_button = st.button("🚀 Run Optimization", type="primary")
 
-            # Format the dataframe for display
-            display_df = recommendations_df[
-                ['name', 'latitude', 'longitude', 'capacity', 'estimated_cost', 'score']].copy()
-            display_df.columns = ['H2 Site Name', 'Latitude', 'Longitude', 'H2 Capacity (MW)', 'Investment ($M)',
-                                  'Optimization Score']
+        with col2:
+            if optimize_button:
+                with st.spinner("Running AI optimization..."):
+                    try:
+                        params = {
+                            'budget': budget,
+                            'max_projects': max_projects,
+                            'weights': {
+                                'cost': weight_cost,
+                                'renewable': weight_renewable,
+                                'demand': weight_demand
+                            }
+                        }
 
-            st.dataframe(display_df, use_container_width=True)
+                        optimization_results = optimizer.optimize_sites(
+                            infrastructure_data, renewable_data, demand_data, params
+                        )
 
-            # H2 Priority ranking
-            st.subheader("🏆 H2 Implementation Priority")
-            priority_chart = visualizer.create_priority_ranking(results)
-            st.plotly_chart(priority_chart, use_container_width=True)
+                        if optimization_results:
+                            st.success(f"✅ Optimization complete! Found {len(optimization_results)} optimal sites")
 
-        else:
-            st.info("Run H2 optimization to view recommendations.")
+                            # Store results in session state
+                            st.session_state.optimization_results = optimization_results
 
+                            # Display results
+                            st.subheader("🏆 Optimization Results")
+                            results_df = pd.DataFrame(optimization_results)
+                            st.dataframe(
+                                results_df[['name', 'score', 'estimated_cost', 'capacity']].round(3),
+                                use_container_width=True
+                            )
+
+                            # Show optimized map
+                            st.subheader("🗺️ Optimized Sites Map")
+                            fig = create_plotly_map(
+                                infrastructure_data, renewable_data, demand_data,
+                                feasibility_data if use_real_data else None,
+                                optimization_results
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+
+                            # Priority ranking chart
+                            fig = visualizer.create_priority_ranking(optimization_results)
+                            st.plotly_chart(fig, use_container_width=True)
+
+                        else:
+                            st.warning("No optimal sites found with current parameters")
+
+                    except Exception as e:
+                        st.error(f"Optimization error: {e}")
+                        st.info("Please check your parameters and try again")
+            else:
+                st.info("👈 Set parameters and click 'Run Optimization' to find optimal H2 sites")
+
+    # TAB 4: Cost Analysis
     with tab4:
-        if st.session_state.optimization_run:
-            st.subheader("💰 H2 Economic Analysis")
+        st.header("💰 Cost Analysis")
 
-            results = st.session_state.optimization_results
+        # Check if optimization results exist
+        if hasattr(st.session_state, 'optimization_results') and st.session_state.optimization_results:
+            optimization_results = st.session_state.optimization_results
 
-            # H2 cost breakdown
             col1, col2 = st.columns(2)
 
             with col1:
-                cost_breakdown = analyzer.calculate_cost_breakdown(results)
-                fig_cost = visualizer.create_cost_breakdown_chart(cost_breakdown)
-                st.plotly_chart(fig_cost, use_container_width=True)
+                # Cost breakdown
+                cost_breakdown = analyzer.calculate_cost_breakdown(optimization_results)
+                fig = visualizer.create_cost_breakdown_chart(cost_breakdown)
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Investment timeline
+                timeline_data = analyzer.create_investment_timeline(optimization_results)
+                fig = visualizer.create_timeline_chart(timeline_data)
+                st.plotly_chart(fig, use_container_width=True)
 
             with col2:
-                roi_analysis = analyzer.calculate_roi_analysis(results)
-                fig_roi = visualizer.create_roi_chart(roi_analysis)
-                st.plotly_chart(fig_roi, use_container_width=True)
+                # ROI analysis
+                roi_analysis = analyzer.calculate_roi_analysis(optimization_results)
+                fig = visualizer.create_roi_chart(roi_analysis)
+                st.plotly_chart(fig, use_container_width=True)
 
-            # H2 investment timeline
-            st.subheader("📅 H2 Investment Timeline")
-            timeline_data = analyzer.create_investment_timeline(results)
-            fig_timeline = visualizer.create_timeline_chart(timeline_data)
-            st.plotly_chart(fig_timeline, use_container_width=True)
-
-            # H2 risk assessment
-            st.subheader("⚠️ H2 Project Risk Assessment")
-            risk_data = analyzer.assess_risks(results)
-            risk_df = pd.DataFrame(risk_data)
-            st.dataframe(risk_df, use_container_width=True)
+                # Risk assessment
+                st.subheader("⚠️ Risk Assessment")
+                risks = analyzer.assess_risks(optimization_results)
+                risks_df = pd.DataFrame(risks)
+                st.dataframe(risks_df, use_container_width=True)
 
         else:
-            st.info("Run H2 optimization to view economic analysis.")
+            st.info("📈 Run optimization first to see cost analysis")
+            st.markdown("""
+            The cost analysis will show:
+            - **Investment breakdown** by category
+            - **ROI analysis** over 20 years  
+            - **Implementation timeline**
+            - **Risk assessment** matrix
+            """)
+
+    # TAB 5: Visualizations
+    with tab5:
+        st.header("📈 Advanced Visualizations")
+
+        viz_col1, viz_col2 = st.columns(2)
+
+        with viz_col1:
+            st.subheader("Renewable H2 Potential")
+            fig = visualizer.create_renewable_potential_chart(renewable_data)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Additional feasibility correlation chart
+            if use_real_data and not feasibility_data.empty:
+                st.subheader("System Efficiency vs H2 Production")
+                fig = px.scatter(
+                    feasibility_data,
+                    x='system_efficiency',
+                    y='h2_production_daily',
+                    size='capacity',
+                    color='feasibility_score',
+                    hover_data=['name'],
+                    title='System Efficiency vs Daily H2 Production',
+                    labels={
+                        'system_efficiency': 'System Efficiency (%)',
+                        'h2_production_daily': 'H2 Production (kg/day)',
+                        'feasibility_score': 'Feasibility Score'
+                    },
+                    color_continuous_scale='Viridis'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+        with viz_col2:
+            if use_real_data and not feasibility_data.empty:
+                st.subheader("Feasibility Score vs H2 Production")
+                fig = px.scatter(
+                    feasibility_data,
+                    x='feasibility_score',
+                    y='h2_production_daily',
+                    size='capacity',
+                    color='system_efficiency',
+                    hover_data=['name'],
+                    title='Feasibility Score vs H2 Production Potential',
+                    labels={
+                        'feasibility_score': 'Feasibility Score',
+                        'h2_production_daily': 'H2 Production (kg/day)',
+                        'system_efficiency': 'System Efficiency (%)'
+                    },
+                    color_continuous_scale='RdYlGn'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.subheader("Solar vs Wind Power Distribution")
+                # Create solar vs wind power scatter plot
+                fig = px.scatter(
+                    feasibility_data,
+                    x='pv_power',
+                    y='wind_power',
+                    size='h2_production_daily',
+                    color='feasibility_score',
+                    hover_data=['name', 'temperature', 'wind_speed'],
+                    title='Solar vs Wind Power Capacity Distribution',
+                    labels={
+                        'pv_power': 'Solar PV Power (kW)',
+                        'wind_power': 'Wind Power (kW)',
+                        'feasibility_score': 'Feasibility Score'
+                    },
+                    color_continuous_scale='Plasma'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Enable feasibility data to see additional visualizations")
+
+    # Footer
+    st.markdown("---")
+    st.markdown("""
+    **🌿 Green Hydrogen Infrastructure Mapper & Optimizer**  
+    *Powered by real feasibility data from 74,000+ analyzed sites*
+
+    📊 **Features:**
+    - Interactive infrastructure mapping (Plotly + Folium)
+    - AI-powered site optimization  
+    - Real feasibility analysis integration
+    - Cost and ROI modeling
+    - Risk assessment
+    """)
 
 
 if __name__ == "__main__":

@@ -76,6 +76,42 @@ class SampleDataGenerator:
             'Himachal Pradesh': {'solar': 'Fair', 'wind': 'Poor', 'hydro': 'Excellent'}
         }
 
+    def integrate_real_feasibility_data(self, feasibility_csv_path: str = 'Hydro_74K.csv') -> pd.DataFrame:
+        """Integrate real feasibility data with synthetic infrastructure"""
+        from modules.data_loader import DataLoader
+
+        # Load real feasibility data
+        data_loader = DataLoader()
+        real_data = data_loader.load_feasibility_data(feasibility_csv_path)
+
+        if real_data.empty:
+            print("⚠️ No real feasibility data loaded, using synthetic data only")
+            return self.generate_infrastructure_data()
+
+        print(f"✅ Loaded {len(real_data)} real feasibility sites")
+
+        # Generate reduced synthetic data to complement real data
+        synthetic_data = self.generate_infrastructure_data(num_existing=10, num_planned=8, num_storage=5)
+
+        # Ensure column compatibility
+        common_columns = ['name', 'type', 'latitude', 'longitude', 'capacity', 'status']
+
+        # Select top feasible sites (feasibility_score > 0.95)
+        top_sites = real_data[real_data['feasibility_score'] > 0.95].copy()
+        top_sites = top_sites.head(100)  # Limit to top 100 sites
+
+        # Prepare real data for integration
+        real_data_subset = top_sites[common_columns + [
+            'solar_irradiance', 'wind_speed', 'h2_production_daily',
+            'feasibility_score', 'annual_h2_production', 'system_efficiency'
+        ]].copy()
+
+        # Combine datasets
+        combined_data = pd.concat([synthetic_data, real_data_subset], ignore_index=True, sort=False)
+
+        print(f"✅ Combined dataset: {len(synthetic_data)} synthetic + {len(real_data_subset)} real sites")
+        return combined_data
+
     def generate_infrastructure_data(self, num_existing=20, num_planned=15, num_storage=10) -> pd.DataFrame:
         """Generate comprehensive hydrogen infrastructure data"""
         np.random.seed(42)
@@ -551,15 +587,20 @@ class SampleDataGenerator:
         }
         return applications_map.get(industry, ['General H2 Use'])
 
-    def save_all_data(self, output_dir: str = 'data/generated/'):
-        """Generate and save all H2-focused datasets"""
+    def save_all_data(self, output_dir: str = 'data/generated/', include_real_data: bool = True):
+        """Generate and save all H2-focused datasets with optional real data integration"""
         import os
         os.makedirs(output_dir, exist_ok=True)
 
         print("Generating H2 infrastructure data...")
-        infrastructure = self.generate_infrastructure_data()
+        if include_real_data:
+            infrastructure = self.integrate_real_feasibility_data()
+        else:
+            infrastructure = self.generate_infrastructure_data()
+
         infrastructure.to_csv(f'{output_dir}infrastructure_data.csv', index=False)
 
+        # Continue with other data generation...
         print("Generating renewable energy data for H2...")
         renewable = self.generate_renewable_data()
         renewable.to_csv(f'{output_dir}renewable_data.csv', index=False)
@@ -579,6 +620,10 @@ class SampleDataGenerator:
 
         print(f"All H2-focused data saved to {output_dir}")
 
+        # Save feasibility data summary
+        if include_real_data:
+            self._save_feasibility_summary(infrastructure, output_dir)
+
         self._generate_summary_stats(infrastructure, renewable, demand, pipelines, output_dir)
 
         return {
@@ -589,6 +634,26 @@ class SampleDataGenerator:
             'economic': economic
         }
 
+    def _save_feasibility_summary(self, infrastructure, output_dir):
+        """Save summary of feasibility data integration"""
+        real_sites = infrastructure[infrastructure['type'] == 'feasible_site']
+
+        if len(real_sites) > 0:
+            summary = {
+                'feasibility_analysis': {
+                    'total_analyzed_sites': len(real_sites),
+                    'avg_feasibility_score': real_sites['feasibility_score'].mean(),
+                    'avg_solar_irradiance': real_sites['solar_irradiance'].mean(),
+                    'avg_wind_speed': real_sites['wind_speed'].mean(),
+                    'avg_system_efficiency': real_sites['system_efficiency'].mean(),
+                    'total_h2_potential_tons_year': real_sites['annual_h2_production'].sum(),
+                    'geographic_distribution': real_sites['region'].value_counts().to_dict()
+                }
+            }
+
+            with open(f'{output_dir}feasibility_summary.json', 'w') as f:
+                json.dump(summary, f, indent=2)
+
     def _generate_summary_stats(self, infrastructure, renewable, demand, pipelines, output_dir):
         """Generate H2-specific summary statistics"""
         stats = {
@@ -598,7 +663,7 @@ class SampleDataGenerator:
                 'blue_h2_plants': len(infrastructure[infrastructure.get('production_method', '') == 'Blue']),
                 'h2_storage_facilities': len(infrastructure[infrastructure['type'] == 'storage']),
                 'total_h2_capacity_mw': infrastructure['capacity'].sum(),
-                'total_h2_investment_million': infrastructure['investment_cost'].sum(),
+                'total_h2_investment_million': infrastructure.get('investment_cost', pd.Series([0])).sum(),
                 'annual_h2_production_tons': infrastructure.get('annual_h2_production', pd.Series([0])).sum()
             },
             'h2_renewable_summary': {
