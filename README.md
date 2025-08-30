@@ -2,7 +2,7 @@
 🌿 Green Hydrogen Infrastructure Mapper & Optimizer
 A comprehensive Streamlit application for analyzing and optimizing green hydrogen infrastructure using real-world feasibility data from 74,000+ analyzed sites. This tool provides interactive mapping, AI-powered site optimization, and detailed cost analysis for hydrogen project planning.
 
-![Green Hydrogen](https://img.shields.io/badge/Energyamework*Dual Map Support**: Both Plotly and Folium interactive maps
+![Green Hydrogen]: Both Plotly and Folium interactive maps
 
 Real Feasibility Data: Integration with 74K+ pre-analyzed sites
 
